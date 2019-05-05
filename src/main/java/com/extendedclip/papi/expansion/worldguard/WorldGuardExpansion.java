@@ -17,129 +17,146 @@
  */
 package com.extendedclip.papi.expansion.worldguard;
 
-import com.sk89q.worldedit.bukkit.BukkitAdapter;
-import com.sk89q.worldguard.WorldGuard;
-import com.sk89q.worldguard.protection.managers.RegionManager;
-import com.sk89q.worldguard.protection.regions.ProtectedRegion;
-import me.clip.placeholderapi.expansion.PlaceholderExpansion;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+import lombok.Getter;
+import lombok.NonNull;
+import lombok.val;
+
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
-import java.util.Set;
+import org.bukkit.scoreboard.Team.Option;
+import com.sk89q.worldedit.bukkit.BukkitAdapter;
+import com.sk89q.worldguard.WorldGuard;
+import com.sk89q.worldguard.protection.regions.ProtectedRegion;
+
+import me.clip.placeholderapi.expansion.PlaceholderExpansion;
 
 public class WorldGuardExpansion extends PlaceholderExpansion {
+    @Getter(onMethod = @__({@Override}))
+    private final String author = "clip";
 
-    private final String NAME = "WorldGuard";
-    private final String IDENTIFIER = NAME.toLowerCase();
-    private final String VERSION = getClass().getPackage().getImplementationVersion();
+    @Getter(onMethod = @__({@Override}))
+    private final String name = "WorldGuard";
+
+    @Getter(onMethod = @__({@Override}))
+    private final String identifier = name.toLowerCase();
+
+    @Getter(onMethod = @__({@Override}))
+    private final String version = getClass().getPackage().getImplementationVersion();
 
     private WorldGuard worldguard;
 
     @Override
     public boolean canRegister() {
-        if (Bukkit.getServer().getPluginManager().getPlugin(NAME) == null)
+        val wgPlugin = Bukkit.getServer().getPluginManager().getPlugin(name);
+
+        if (Objects.isNull(wgPlugin)) {
             return false;
-        worldguard = WorldGuard.getInstance();
-        return worldguard != null;
+        }
+
+        val instance = Optional.ofNullable(WorldGuard.getInstance());
+
+        worldguard = instance.orElseGet(null);
+
+        return instance.isPresent();
     }
 
     @Override
-    public String onRequest(OfflinePlayer offlinePlayer, String params) {
+    public String onRequest(OfflinePlayer offlinePlayer, String identifier) {
+        val player = (Player) offlinePlayer;
 
-        ProtectedRegion r;
-
-        if (params.contains(":")) {
-            String[] args = params.split(":");
-            params = args[0];
-            r = getRegion(deserializeLoc(args[1]));
-        } else {
-            if (offlinePlayer == null || !offlinePlayer.isOnline()) {
-                return "";
-            }
-            r = getRegion(((Player) offlinePlayer).getLocation());
-        }
-
-        if (r == null) {
+        if (Objects.isNull(player)) {
             return "";
         }
 
-        switch (params) {
+        if (!player.isOnline()) {
+            return "";
+        }
+
+        val region = getRegion(player.getLocation());
+
+        if (!region.isPresent()) {
+            return "";
+        }
+
+        return processIdentifier(identifier, region.get())
+                .orElseThrow(() -> new IllegalArgumentException("No such placeholder."));
+    }
+
+    /**
+     * Returns the value corresponding to an identifier.
+     *
+     * @param identifier Identifier, like {@code region_name}, {@code region_members}, etc.
+     * @param region     WG's region, used for processing
+     *
+     * @return Result as {@code Optional}, therefore maybe {@code null}.
+     */
+    private Optional<String> processIdentifier(@NonNull String identifier, @NonNull ProtectedRegion region) {
+        String result;
+
+        switch (identifier) {
             case "region_name":
-                return r.getId();
-            case "region_owner":
-                Set<String> o = r.getOwners().getPlayerDomain().getPlayers();
-                return o == null ? "" : String.join(", ", o);
-            case "region_owner_groups":
-                return r.getOwners().toGroupsString();
+                result = region.getId();
+                break;
+
+            case "region_owners":
+                val owners =region.getOwners().getPlayerDomain().getUniqueIds().stream()
+                    .map(uuid -> {
+                        return Bukkit.getOfflinePlayer(uuid).getName();
+                    }).collect(Collectors.toList());
+
+                result = owners.isEmpty() ? "" : String.join(", ", owners);
+                break;
+
             case "region_members":
-                Set<String> m = r.getMembers().getPlayers();
-                return m == null ? "" : String.join(", ", m);
-            case "region_members_groups":
-                return r.getMembers().toGroupsString();
+                val members = region.getMembers().getPlayerDomain().getUniqueIds().stream()
+                    .map(uuid -> {
+                        return Bukkit.getOfflinePlayer(uuid).getName();
+                    }).collect(Collectors.toList());
+
+                result = members.isEmpty() ? "" : String.join(", ", members);
+                break;
+
             case "region_flags":
-                return r.getFlags().entrySet().toString();
+                result = region.getFlags().entrySet().toString();
+                break;
+
+            default:
+                return Optional.empty();
         }
 
-        return null;
+        return Optional.ofNullable(result);
     }
 
-    private ProtectedRegion getRegion(Location loc) {
-        if (loc == null)
-            return null;
+    /**
+     * Gets a region from the location.
+     *
+     * @param location Location
+     *
+     * @return a region, maybe {@code null}.
+     */
+    private Optional<ProtectedRegion> getRegion(@NonNull Location location) {
+        val manager = worldguard
+            .getPlatform()
+            .getRegionContainer()
+            .get(BukkitAdapter.adapt(location.getWorld()));
 
-        RegionManager manager = worldguard.getPlatform().getRegionContainer()
-                .get(BukkitAdapter.adapt(loc.getWorld()));
-
-        if (manager == null)
-            return null;
+        if (Objects.isNull(manager)) {
+            return Optional.empty();
+        }
 
         try {
+            val vector  = BukkitAdapter.adapt(location).toVector().toBlockPoint();
+            val regions = manager.getApplicableRegionsIDs(vector);
 
-            ProtectedRegion region = manager.getRegion(manager
-                    .getApplicableRegionsIDs(BukkitAdapter.adapt(loc).toVector().toBlockPoint())
-                    .get(0));
-
-            return region;
-
+            return Optional.ofNullable(manager.getRegion(regions.get(0)));
         } catch (IndexOutOfBoundsException e) {
-
-            return null;
-
+            return Optional.empty();
         }
-    }
-
-    // world,x,y,z
-    private Location deserializeLoc(String locString) {
-        if (!locString.contains(",")) {
-            return null;
-        }
-        String[] s = locString.split(",");
-        try {
-            return new Location(Bukkit.getWorld(s[0]), Double.parseDouble(s[1]),
-                    Double.parseDouble(s[2]), Double.parseDouble(s[3]));
-        } catch (Exception e) {
-        }
-        return null;
-    }
-
-    @Override
-    public String getName() {
-        return NAME;
-    }
-
-    @Override
-    public String getAuthor() {
-        return "clip";
-    }
-
-    @Override
-    public String getVersion() {
-        return VERSION;
-    }
-
-    @Override
-    public String getIdentifier() {
-        return IDENTIFIER;
     }
 }
