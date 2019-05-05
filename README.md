@@ -1,7 +1,8 @@
 # WorldGuard-Expansion
 
+[![Build Status](https://travis-ci.org/akaregi/WorldGuard-Expansion.svg?branch=master)](https://travis-ci.org/akaregi/WorldGuard-Expansion)
+
 Adds placeholders for WorldGuard.
-[![Build Status](http://ci.extendedclip.com/buildStatus/icon?job=WorldGuard-Expansion)](http://ci.extendedclip.com/job/WorldGuard-Expansion)
 
 ## Requirements
 
